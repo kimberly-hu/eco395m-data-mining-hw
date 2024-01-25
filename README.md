@@ -1,1 +1,1 @@
-# eco395m-data-mining-hw
+# ECO395M Data Mining Homework
