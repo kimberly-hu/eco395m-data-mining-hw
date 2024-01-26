@@ -1,0 +1,25 @@
+---
+title: "ECO395M Homework 1"
+author: "Kimberly Hu, Meilin Li, Yueting Zhang"
+date: "2024-01-26"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r packages}
+library(ggplot2)
+library(tidyverse)
+```
+
+## 1. Data visualization: flights at ABIA
+
+```{r question-1}
+
+abia = read.csv()
+
+
+```
+
