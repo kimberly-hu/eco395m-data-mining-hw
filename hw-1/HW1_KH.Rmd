@@ -155,7 +155,53 @@ ggplot(dl_delay, aes(x = DepDelay, y=..density..)) +
 
 ```{r q2-1}
 
+olympics = read.csv('data/olympics_top20.csv')
+
 ```
+
+### A)
+
+The 95th percentile of heights for female competitors across all Athletics events is 183 cm.
+
+```{r q2-2}
+
+olympics %>% 
+  filter(sport == "Athletics", sex == "F") %>%
+  summarize(q95_height = quantile(height, 0.95))
+
+```
+
+### B)
+
+The single women's event that had the greatest variability in competitor's heights is Rowing Women's Coxed Fours, with a standard deviation of 10.87.
+
+```{r q2-3}
+
+olympics %>% 
+  filter(sex == "F") %>%
+  group_by(event) %>%
+  summarize(sd_height = sd(height)) %>%
+  slice_max(sd_height)
+
+```
+
+### C)
+
+How has the average age of Olympic swimmers changed over time? Does the trend look different for male swimmers relative to female swimmers?
+
+```{r q2-4}
+
+swimmers = olympics %>%
+  filter(sport == "Swimming") %>%
+  group_by(year, sex) %>%
+  summarize(mean_age = mean(age)) %>%
+  arrange(desc(sex))
+
+ggplot(swimmers, aes(x=year, y=mean_age, color=sex)) +
+  geom_line()
+
+```
+
 
 
 ## 3. K-nearest neighbors: cars
