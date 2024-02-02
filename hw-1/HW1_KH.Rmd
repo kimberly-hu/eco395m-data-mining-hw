@@ -1,25 +1,171 @@
 ---
 title: "ECO395M Homework 1"
 author: "Kimberly Hu, Meilin Li, Yueting Zhang"
-date: "2024-01-26"
+date: "2024-02-05"
 output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      out.width = "75%", out.height = "75%")
+
 ```
 
-```{r packages}
+```{r packages, include=FALSE}
+
 library(ggplot2)
 library(tidyverse)
+library(knitr)
+library(kableExtra)
+
 ```
 
 ## 1. Data visualization: flights at ABIA
 
-```{r question-1}
+Flight delays can often prove to be quite inconvenient. In order to enhance our overall travel experience, it is beneficial to examine the patterns of flight delays. In this question, we focused on flights that departed from the Austin-Bergstrom International Airport (AUS) in 2008, specifically those that departed later than the scheduled time.
 
-abia = read.csv()
+```{r q1-1}
+
+abia = read.csv('data/abia.csv')
+
+# keep only flights departing from AUS
+dep = filter(abia, Origin == "AUS")
+
+# keep only flights with departure delays
+delay = filter(abia, DepDelay > 0 & Origin == "AUS")
+
+```
+
+The output below shows the summary statistics and distribution of all departure delays in minutes. The range of delays is quite large, with the minimum at 1 minute and the maximum at 875 minutes. Despite the right tail being very long, it is worth noting that most flights delayed no more than half an hour, since the third quartile is only 31.
+
+```{r q1-2}
+
+summary(delay$DepDelay)
+
+# histogram for all delays
+ggplot(delay, aes(x = DepDelay)) +
+  geom_histogram(bins = 20, fill = "skyblue", color = "skyblue", alpha = 0.9) +
+  labs(x = "Departure delay (min)",
+       y = "Count",
+       title = "All Departure Delays") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust=0.5))
+
+```
+
+We extracted the top 10 longest delays from the dataset. All 10 flights experienced delays longer than 400 minutes, and were spread out throughout the year and hours of the day. Out of the 10 delays, 4 were operated by JetBlue (B6). 
+
+```{r q1-3}
+
+# table - top 10 longest delays
+top_10_delay = delay %>%
+  select(Year, Month, DayofMonth, CRSDepTime, UniqueCarrier, FlightNum, 
+         DepDelay, Origin, Dest) %>%
+  arrange(desc(DepDelay)) %>%
+  head(10)
+
+colnames(top_10_delay) = c("Year", "Month", "Day", "Scheduled Departure", 
+                           "Airline", "Flight Number", 
+                            "Departure Delay (min)", "Origin", "Destination")
+
+kable(top_10_delay, align = "c")
 
 
 ```
+
+The following bar plots show the top 10 airlines with the most departure delays, in terms of number of delays and percentage of flights delayed. We noticed that there is an overlap of airlines in the two plots. Winair (WN) had significantly more delays than others, both in terms of count and percentage. Following Winair, ExpressJet (EV), Delta (DL), JetSuiteX (XE) and PSA Airlines (OH) had the highest percentage of flights delayed.  
+
+```{r q1-4}
+
+# bar plot - most delayed airlines (count and percentage)
+delay_by_airline = delay %>%
+  count(UniqueCarrier)
+
+dep_by_airline = dep %>%
+  count(UniqueCarrier)
+
+most_delay_airline = delay_by_airline %>%
+  merge(dep_by_airline, by = "UniqueCarrier") %>%
+  mutate(pct_delay = n.x / n.y) %>%
+  arrange(desc(pct_delay)) %>%
+  head(10)
+
+ggplot(most_delay_airline, aes(x = reorder(UniqueCarrier, -n.x), y = n.x)) +
+  geom_bar(stat="identity", fill = "skyblue", color = "skyblue", alpha = 0.9) +
+  labs(x="Airline",
+       y="Number of delays",
+       title="Departure Delays by Airline") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust=0.5))
+
+```
+```{r q1-5}
+
+ggplot(most_delay_airline, aes(x = reorder(UniqueCarrier, -pct_delay), y = pct_delay)) +
+  geom_bar(stat="identity", fill = "skyblue", color = "skyblue", alpha = 0.9) +
+  labs(x="Airline",
+       y="Percentage of flights delayed",
+       title="Departure Delays by Airline") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust=0.5))
+
+```
+
+We then investigated whether delay patterns differ by hours of the day. From the density plot for all delayed flights, it seems that flights in the evenings tend to have longer delays than those in the mornings, reflected by thicker right tails. 
+
+Since Delta Airlines is a major commercial airline that had a lot of delayed flights, we wanted to know if it had the same patterns as the whole sample. The density plot shows that Delta didn't have flights departing after 6 pm, but it still experienced a lot of delays during the day. One interesting point is that their flights departing from 3 pm to 4 pm had a good number of delays over 2 hours. So it may be a good idea to choose another airlines if we want to leave Austin in the afternoon. 
+
+```{r q1-6}
+
+# generate hours of departure
+delay = delay %>%
+  mutate(DepHr = floor(CRSDepTime / 100))
+
+# faceted density plot - delays by hour
+ggplot(delay, aes(x = DepDelay, y=..density..)) +
+  geom_density(fill = "skyblue", color = "skyblue") +
+  facet_wrap(~ DepHr) +
+  labs(x = "Departure delay (min)",
+       y = "Density",
+       title = "Departure Delays by Hour") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust=0.5))
+
+```
+
+```{r q1-7}
+
+# faceted density plot - delays by hour (DL only)
+
+dl_delay = filter(delay, delay$UniqueCarrier == "DL")
+
+ggplot(dl_delay, aes(x = DepDelay, y=..density..)) +
+  geom_density(fill = "skyblue", color = "skyblue") +
+  facet_wrap(~ DepHr) +
+  labs(x = "Departure delay (min)",
+       y = "Density",
+       title = "Departure Delays by Hour (Delta Airlines)") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust=0.5))
+
+```
+
+
+## 2. Wrangling the Olympics
+
+```{r q2-1}
+
+```
+
+
+## 3. K-nearest neighbors: cars
+
+```{r q3-1}
+
+
+
+```
+
+
+
 
