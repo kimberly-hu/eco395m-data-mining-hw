@@ -1,0 +1,211 @@
+---
+title: "Untitled"
+output: pdf_document
+date: "2024-02-03"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Q3:K-nearest neighbors: cars
+
+
+The data in sclass.csv contains data on over 29,000 Mercedes S Class vehicles---essentially every such car in this class that was advertised on the secondary automobile market during 2014. For websites like Cars.com or Truecar that aim to provide market-based pricing information to consumers, the Mercedes S class is a notoriously difficult case. There is a huge range of sub-models that are all labeled "S Class,"" from large luxury sedans to high-performance sports cars; one sub-category of S class has even served as the safety car in Formula 1 Races. Moreover, individual submodels involve cars with many different features. This extreme diversity---unusual for a single model of car---makes it difficult to provide accurate pricing predictions to consumers.
+
+
+We focus on three variables in particular:
+
+1)trim: categorical variable for car's trim level, e.g. 350, 63 AMG, etc. 
+2)mileage: mileage on the car
+
+3)price: the sales price in dollars of the car
+
+We use K-nearest neighbors to build a predictive model for price, given mileage, separately for each of two trim levels: 350 and 65 AMG.
+
+###Model 350
+
+For trim 350, we make a plot of RMSE versus K:
+
+```{r q3-1}
+library(readr)
+library(dplyr)
+library(class)
+library(rsample)
+library(purrr) 
+library(modelr) 
+library(caret) 
+install.packages("foreach")
+install.packages("doParallel")
+library(foreach)
+library(doParallel)
+
+# Register doParallel as the backend for foreach
+# Use detectCores() to find the number of available cores
+numCores <- detectCores()
+cl <- makeCluster(numCores)
+
+
+
+sclass_data <- read.csv("~/Desktop/ECO395M/data/sclass.csv")
+
+#filter data
+sclass_350 = filter(sclass_data, trim == "350")
+nrow(sclass_350)
+
+# split testing and training dataset
+sclass_350_split = initial_split(sclass_350, prop = 0.8)
+sclass_350_train = training(sclass_350_split)
+sclass_350_test = testing(sclass_350_split)
+
+# k-fold cross validation
+k_folds = 5
+
+# divide the data into 5 groups
+sclass_350_folds = crossv_kfold(sclass_350, k=k_folds)
+
+k_grid = c(2:100) # define a series of k
+
+cv_grid350 = foreach(k = k_grid, .combine='rbind') %dopar% {
+  models = map(sclass_350_folds$train, ~ knnreg(price ~ mileage, k=k, data = ., use.all=FALSE))
+  errs = map2_dbl(models, sclass_350_folds$test, modelr::rmse)
+  c(k=k, err = mean(errs), std_err = sd(errs)/sqrt(k_folds)) 
+} %>% as.data.frame
+
+# find minimum k
+cv_grid_350[which.min(cv_grid_350$err),]
+
+# plot means and std errors versus k
+ggplot(cv_grid350) + 
+  geom_point(aes(x=k, y=err)) + 
+  geom_errorbar(aes(x=k, ymin = err-std_err, ymax = err+std_err)) + 
+    labs(x = "K",
+       y = "RMSE", 
+       title = "RMSE versus K (trim = 350)")+
+  scale_x_log10()+
+    geom_vline(xintercept=min_err_350, color="blue")
+
+```
+
+Here, we employ K-fold cross validation to enhance prediction accuracy, selecting a K value of 5. The graph indicates that the model achieves its lowest point at K=12 (for KNN), with a mean RMSE (Root Mean Square Error) of 10,230.
+
+Subsequently, we generate a plot of the fitted model, illustrating the relationship between price and mileage, to determine the optimal K value. Typically, models with a lower RMSE (indicating reduced bias) tend to exhibit increased variance. To balance the bias-variance trade-off, we present plots for three models with K values of 12, 20, and 30, allowing us to approximately assess the trade-off.
+
+
+```{r q3-2}
+
+#K=12
+knn12 = knnreg(price ~ mileage, data=sclass_350_train, k=12)
+modelr::rmse(knn12, sclass_350_test)
+
+sclass_350_test = sclass_350_test%>%
+  mutate(Price_pred_12 = predict(knn12, sclass_350_test))
+
+p_test = ggplot(data = sclass_350_test) + 
+  geom_point(mapping = aes(x = mileage, y = price), alpha=0.2)
+
+p_test + geom_line(aes(x = mileage, y = Price_pred_12), color='red', size=1.5)+
+  labs(title = "Price versus Mileage (K=12)", x = "Mileage", y = "Price")
+
+#K=20
+knn20 = knnreg(price ~ mileage, data=sclass_350_train, k=20)
+modelr::rmse(knn20, sclass_350_test)
+
+sclass_350_test = sclass_350_test%>%
+  mutate(Price_pred_20 = predict(knn20, sclass_350_test))
+
+p_test = ggplot(data = sclass_350_test) + 
+  geom_point(mapping = aes(x = mileage, y = price), alpha=0.2)
+
+p_test + geom_line(aes(x = mileage, y = Price_pred_20), color='red', size=1.5)+
+  labs(title = "Price versus Mileage (K=20)", x = "Mileage", y = "Price")
+
+
+#K=30
+knn30 = knnreg(price ~ mileage, data=sclass_350_train, k=30)
+modelr::rmse(knn30, sclass_350_test)
+
+sclass_350_test = sclass_350_test%>%
+  mutate(Price_pred_30 = predict(knn30, sclass_350_test))
+
+p_test = ggplot(data = sclass_350_test) + 
+  geom_point(mapping = aes(x = mileage, y = price), alpha=0.2)
+
+p_test + geom_line(aes(x = mileage, y = Price_pred_30), color='red', size=1.5)+
+  labs(title = "Price versus Mileage (K=30)", x = "Mileage", y = "Price")
+
+
+```
+
+The analysis of the plot indicates that a K=12 maintains model simplicity without significant compromise when compared to other models. Therefore, we select K=12 as the optimal choice for our model.
+
+###Model 65 AMG
+
+```{r q3-3}
+
+sclass_65 = filter(sclass, trim == "65 AMG")
+nrow(sclass_65)
+
+sclass_65_split = initial_split(sclass_65, prop = 0.8)
+sclass_65_train = training(sclass_65_split)
+sclass_65_test = testing(sclass_65_split)
+
+k_grid_65 = c(2:100)
+
+K_folds = 5
+
+# divide the data into 5 groups
+sclass_65_folds = crossv_kfold(sclass_65, k=K_folds)
+
+# calculate mean rmse over the range of k
+cv_grid_65 = foreach(k = k_grid_65, .combine='rbind') %dopar% {
+  models = map(sclass_65_folds$train, ~ knnreg(price ~ mileage, k=k, data = ., use.all=FALSE))
+  errs = map2_dbl(models, sclass_65_folds$test, modelr::rmse)
+  c(k=k, err = mean(errs), std_err = sd(errs)/sqrt(K_folds))
+} %>% as.data.frame
+
+# find minimum k
+cv_grid_65[which.min(cv_grid_65$err),]
+min = cv_grid_65[which.min(cv_grid_65$err),]
+
+ggplot(cv_grid_65) + 
+  geom_point(aes(x=k, y=err)) +
+    geom_errorbar(aes(x=k, ymin = err-std_err, ymax = err+std_err)) + 
+  geom_vline(xintercept=min_err_65, color="blue") +
+  scale_x_log10() + 
+  labs(x = "K",
+        y = "RMSE", 
+        title = "RMSE versus K (trim = 65 AMG)")
+
+```
+
+Upon repeated executions of the code, we observe that the optimal value of K varies, as indicated by the graph, with the minimum K value fluctuating roughly between 10 and 20. 
+
+Thus we opt to select K=20 as the optimal choice for smaller variance. 
+
+```{r q3-4}
+
+# plot predictions vs x for k=20
+
+# K=20
+knn20_ = knnreg(price ~ mileage, data=sclass_65_train, k=20)
+modelr::rmse(knn20_, sclass_65_test)
+
+sclass_65_test = sclass_65_test  %>%
+  mutate(Price_pred = predict(knn18, sclass_65_test))
+
+p_test = ggplot(data = sclass_65_test) + 
+  geom_point(mapping = aes(x = mileage, y = price), alpha=0.2)
+
+p_test + geom_line(aes(x = mileage, y = Price_pred), color='red', size=1.5)+
+  labs(title = "Price versus Mileage (K=18)", x = "Mileage", y = "Price")
+
+
+```
+
+
+
+Based on the analysis of the plot, it is evident that a K value of 20 offers a balanced trade-off between bias and variance, leading us to conclude that K=20 is the optimal value for our model.
+
+Consequently, the Trim 65 AMG model with its optimal K value of 20, demonstrates a preference for a larger K value compared to the Trim 350 model, which has an optimal K value of 12. This distinction suggests that the Trim 65 AMG model benefits from a slightly higher level of complexity to accurately capture its underlying patterns, likely due to its unique characteristics or data distribution.
+
