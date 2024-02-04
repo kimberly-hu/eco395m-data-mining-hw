@@ -42,7 +42,7 @@ Standard deviation reflects the variability of data. Thus, we may calculate the 
 athletics_f %>%
   filter(sex == "F") %>%
   group_by(event) %>%
-  summarize(sd = sd(height), avg = mean(height)) %>%
+  summarize(mean = mean(height), sd = sd(height)) %>%
   slice_max(sd)
 
 ```

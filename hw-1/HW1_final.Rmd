@@ -1,0 +1,373 @@
+---
+title: "ECO395M Homework 1"
+author: "Kimberly Hu, Meilin Li, Yueting Zhang"
+date: "2024-02-05"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      out.width = "75%", out.height = "75%")
+
+```
+
+```{r packages, include=FALSE}
+
+library(ggplot2)
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(rsample)
+library(caret)
+library(modelr)
+library(parallel)
+library(foreach)
+library(purrr)
+
+```
+
+## 1. Data visualization: flights at ABIA
+
+Flight delays can often prove to be quite inconvenient. In order to enhance our overall travel experience, it is beneficial to examine the patterns of flight delays. In this question, we focused on flights that departed from the Austin-Bergstrom International Airport (AUS) in 2008, specifically those that departed later than the scheduled time.
+
+```{r q1-1}
+
+abia = read.csv('data/abia.csv')
+
+# keep only flights departing from AUS
+dep = filter(abia, Origin == "AUS")
+
+# keep only flights with departure delays
+delay = filter(abia, DepDelay > 0 & Origin == "AUS")
+
+```
+
+The output below shows the summary statistics and distribution of all departure delays in minutes. The range of delays is quite large, with the minimum at 1 minute and the maximum at 875 minutes. Despite the right tail being very long, it is worth noting that most flights delayed no more than half an hour, since the third quartile is only 31.
+
+```{r q1-2}
+
+summary(delay$DepDelay)
+
+# histogram for all delays
+ggplot(delay, aes(x = DepDelay)) +
+  geom_histogram(bins = 20, fill = "skyblue", color = "skyblue", alpha = 0.9) +
+  labs(x = "Departure delay (min)",
+       y = "Count",
+       title = "All Departure Delays") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust=0.5))
+
+```
+
+We extracted the top 10 longest delays from the data set. All 10 flights experienced delays longer than 400 minutes, and were spread out throughout the year and hours of the day. Out of the 10 delays, 4 were operated by JetBlue (B6). 
+
+```{r q1-3}
+
+# table - top 10 longest delays
+top_10_delay = delay %>%
+  select(Year, Month, DayofMonth, CRSDepTime, UniqueCarrier, FlightNum, 
+         DepDelay, Origin, Dest) %>%
+  arrange(desc(DepDelay)) %>%
+  head(10)
+
+colnames(top_10_delay) = c("Year", "Month", "Day", "Scheduled Departure", 
+                           "Airline", "Flight Number", 
+                            "Departure Delay (min)", "Origin", "Destination")
+
+kable(top_10_delay, align = "c")
+
+
+```
+
+The following bar plots show the top 10 airlines with the most departure delays, in terms of number of delays and percentage of flights delayed. We noticed that there is an overlap of airlines in the two plots. Winair (WN) had significantly more delays than others, both in terms of count and percentage. Following Winair, ExpressJet (EV), Delta (DL), JetSuiteX (XE) and PSA Airlines (OH) had the highest percentage of flights delayed.  
+
+```{r q1-4}
+
+# bar plot - most delayed airlines (count and percentage)
+delay_by_airline = delay %>%
+  count(UniqueCarrier)
+
+dep_by_airline = dep %>%
+  count(UniqueCarrier)
+
+most_delay_airline = delay_by_airline %>%
+  merge(dep_by_airline, by = "UniqueCarrier") %>%
+  mutate(pct_delay = n.x / n.y) %>%
+  arrange(desc(pct_delay)) %>%
+  head(10)
+
+ggplot(most_delay_airline, aes(x = reorder(UniqueCarrier, -n.x), y = n.x)) +
+  geom_bar(stat="identity", fill = "skyblue", color = "skyblue", alpha = 0.9) +
+  labs(x="Airline",
+       y="Number of delays",
+       title="Departure Delays by Airline") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust=0.5))
+
+```
+
+```{r q1-5}
+
+ggplot(most_delay_airline, aes(x = reorder(UniqueCarrier, -pct_delay), y = pct_delay)) +
+  geom_bar(stat="identity", fill = "skyblue", color = "skyblue", alpha = 0.9) +
+  labs(x="Airline",
+       y="Percentage of flights delayed",
+       title="Departure Delays by Airline") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust=0.5))
+
+```
+
+We then investigated whether delay patterns differ by hours of the day. From the density plot for all delayed flights, it seems that flights in the evenings tend to have longer delays than those in the mornings, reflected by thicker right tails. 
+
+Since Delta Airlines is a major commercial airline that had a lot of delayed flights, we wanted to know if it had the same patterns as the whole sample. The density plot shows that Delta didn't have flights departing after 6 pm, but it still experienced a lot of delays during the day. One interesting point is that their flights departing from 3 pm to 4 pm had a good number of delays over 2 hours. So it may be a good idea to choose another airlines if we want to leave Austin in the afternoon. 
+
+```{r q1-6}
+
+# generate hours of departure
+delay = delay %>%
+  mutate(DepHr = floor(CRSDepTime / 100))
+
+# faceted density plot - delays by hour
+ggplot(delay, aes(x = DepDelay, y=..density..)) +
+  geom_density(fill = "skyblue", color = "skyblue") +
+  facet_wrap(~ DepHr) +
+  labs(x = "Departure delay (min)",
+       y = "Density",
+       title = "Departure Delays by Hour") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust=0.5))
+
+```
+
+```{r q1-7}
+
+# faceted density plot - delays by hour (DL only)
+
+dl_delay = filter(delay, delay$UniqueCarrier == "DL")
+
+ggplot(dl_delay, aes(x = DepDelay, y=..density..)) +
+  geom_density(fill = "skyblue", color = "skyblue") +
+  facet_wrap(~ DepHr) +
+  labs(x = "Departure delay (min)",
+       y = "Density",
+       title = "Departure Delays by Hour (Delta Airlines)") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust=0.5))
+
+```
+
+
+## 2. Wrangling the Olympics
+
+In this part, we want to investigate some statistical facts about all Olympics medalists from 1896 till recent. This data set contains information including competitors' basic information, the categories of sports they play, the event in which they won the medal, etc. 
+
+```{r q2-1}
+
+athletics_f = read.csv('data/olympics_top20.csv')
+
+```
+
+### A) What is the 95th percentile of heights for female competitors across all Athletics events ? 
+
+To answer this question, we first filtered the female players who played athletics sports from the original data set, then calculated the 95% quantile of heights. The 95% quantile of heights for female Athletics players is 183 cm. 
+
+```{r q2-2}
+
+athletics_f %>% 
+  filter(sex == "F" & sport == "Athletics")%>%
+  summarise(percentile_95=quantile(height, 0.95))
+
+```
+
+### B) Which single women's event had the greatest variability in competitor's heights across the entire history of the Olympics, as measured by the standard deviation?
+
+Standard deviation reflects the variability in data. We calculated the standard deviation of height grouped by each event, then found the event with the highest standard deviation. The event with the greatest variability in players' heights is Rowing Women's Coxed Fours, with a standard deviation of 10.9.
+
+```{r q2-3}
+
+athletics_f %>%
+  filter(sex == "F") %>%
+  group_by(event) %>%
+  summarize(mean = mean(height), sd = sd(height)) %>%
+  slice_max(sd)
+
+```
+
+### C) How has the average age of Olympic swimmers changed over time? Does the trend look different for male swimmers relative to female swimmers?
+
+In the plot below, the x-axis is the year while the y-axis is the average age of swimmers. The two lines, with the blue one tracking the values of average age of male swimmers and the red one tracking that of female swimmers, tells us about how average age of swimmers changed from 1900s till recent. We can see that generally, the female swimmers are younger than male swimmers. 
+
+The average age of male swimmers reached a peak in 1925, which was 32. However, that age dramatically dropped in the following years to as low as below 20. About the growing average age of swimmers before 1925, we suspect that this pattern may be resulted by two reasons: 1) This sport was still young in the Olympics, so not many professional young swimmers were trained as successors. 2) Due to the ongoing wars and the unstable economic environment in the postwar period, young males were not able to professionally prepare for Olympics games. The sudden drop in age of swimmers indicates a turning point in which the older swimmers retired and younger ones joined the game. 
+
+The line of female competitors is shorter than that of males, which echoes with the fact that female athletics were not accepted in international sports events until that time. Starting to join Olympics in around 1920s, the average age of female swimmers has always been younger than that of male swimmers except for the year of 2000. In 2000, the average age of male and female competitors intersected at between 22-23 years old. 
+
+Generally speaking, the average age of both female and male swimmers slowly grew after 1950, with very slight fluctuations. This indicates that the selection and preparation for international professional swimmers has settled into a steady state. 
+
+```{r q2-4}
+
+swimming = athletics_f %>%
+  filter(sport == "Swimming") %>%
+  group_by(year, sex) %>%
+  summarize(avg_age = mean(age))
+
+ggplot(swimming, aes(x = year, y = avg_age, color = sex)) +
+  geom_line() +
+  labs(
+    x = "Year",
+    y = "Average age",
+    title = "Average Age of Olympic Swimmers Over Time"
+     ) +
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust=0.5))
+
+```
+
+
+## 3. K-nearest neighbors: cars
+
+Our goal is to use K-nearest neighbors to build a predictive model for price, given mileage, for cars with two trim levels: 350 and 65 AMG.
+
+```{r q3-1}
+
+sclass = read.csv('data/sclass.csv')
+
+sclass_350 = filter(sclass, trim == "350")
+
+sclass_65 = filter(sclass, trim == "65 AMG")
+
+```
+
+### Cars with trim level 350
+
+We first filtered cars with trim levels of 350, and split the data into training and testing data. To find the optimal K value for the KNN model, which minimizes RMSE on the training data, we calculated RMSE at different K values. The range of K values tested was from 2 to the number of total observations in the data set. We employed K-fold cross validation to enhance prediction accuracy of RMSE, selecting a K-fold value of 5. The results below show the K value that minimizes mean RMSE and a plot of RMSE versus K.
+
+```{r q3-2}
+
+# knn for model 350 
+
+sclass_350_split = initial_split(sclass_350, prop = 0.8)
+sclass_350_train = training(sclass_350_split)
+sclass_350_test = testing(sclass_350_split)
+
+k_grid_350 = c(2:332)
+
+K_folds = 5
+
+# divide the data into 5 groups
+sclass_350_folds = crossv_kfold(sclass_350, k=K_folds)
+
+# calculate mean rmse over the range of k
+cv_grid_350 = foreach(k = k_grid_350, .combine='rbind') %dopar% {
+  models = map(sclass_350_folds$train, ~ knnreg(price ~ mileage, k=k, data = ., use.all=FALSE))
+  errs = map2_dbl(models, sclass_350_folds$test, modelr::rmse)
+  c(k=k, err = mean(errs), std_err = sd(errs)/sqrt(K_folds))
+} %>% as.data.frame
+
+# find minimum rmse
+cv_grid_350[which.min(cv_grid_350$err),]
+
+# plot rmse vs k
+min_err_350 = cv_grid_350$k[which.min(cv_grid_350$err)]
+ggplot(cv_grid_350) + 
+  geom_line(aes(x=k, y=err)) +
+  geom_vline(xintercept=min_err_350, color="skyblue") +
+  scale_x_log10() + 
+  labs(x = "K",
+        y = "RMSE", 
+        title = "RMSE versus K (trim = 350)") + 
+  theme_minimal()  +
+  theme(plot.title = element_text(hjust=0.5))
+
+```
+
+The RMSE value changes with different splits of the data. After running the model multiple times, we found that the K value with the minimum RMSE falls in the range of 12 to 20. Typically, models with a lower RMSE (indicating reduced bias) tend to exhibit increased variance. To balance the bias-variance trade-off, we chose the median K = 16 as the optimal K value.
+
+We used KNN model with K = 16 on the testing data to predict price based on mileage. The plot below shows predicted price versus mileage for cars with trim levels 350.
+
+```{r q3-3}
+
+# plot predictions vs x for k=12
+
+knn16 = knnreg(price ~ mileage, data=sclass_350_train, k=16)
+
+sclass_350_test = sclass_350_test %>%
+  mutate(price_pred = predict(knn16, sclass_350_test))
+
+ggplot(sclass_350_test) + 
+  geom_point(mapping = aes(x = mileage, y = price), alpha=0.5) + 
+  geom_line(aes(x = mileage, y = price_pred), color='skyblue', size=1.5) +
+  labs(title = "Predicted Price versus Mileage (trim = 350)", x = "Mileage", y = "Price") + 
+  theme_minimal()  +
+  theme(plot.title = element_text(hjust=0.5))
+
+
+```
+
+### Cars with trim level 65 AMG
+
+We performed similar procedures for cars with trim levels of 65 AMG. The K value with the minimum RMSE falls in the range of 9 to 30. To balance between bias and variance, K = 20 was chosen as the optimal K value. 
+
+```{r q3-4}
+
+# knn for model 65 AMG 
+
+sclass_65_split = initial_split(sclass_65, prop = 0.8)
+sclass_65_train = training(sclass_65_split)
+sclass_65_test = testing(sclass_65_split)
+
+k_grid_65 = c(2:292)
+
+K_folds = 5
+
+# divide the data into 5 groups
+sclass_65_folds = crossv_kfold(sclass_65, k=K_folds)
+
+# calculate mean rmse over the range of k
+cv_grid_65 = foreach(k = k_grid_65, .combine='rbind') %dopar% {
+  models = map(sclass_65_folds$train, ~ knnreg(price ~ mileage, k=k, data = ., use.all=FALSE))
+  errs = map2_dbl(models, sclass_65_folds$test, modelr::rmse)
+  c(k=k, err = mean(errs), std_err = sd(errs)/sqrt(K_folds))
+} %>% as.data.frame
+
+# find minimum rmse
+cv_grid_65[which.min(cv_grid_65$err),]
+
+# plot rmse vs k
+min_err_65 = cv_grid_65$k[which.min(cv_grid_65$err)]
+ggplot(cv_grid_65) + 
+  geom_line(aes(x=k, y=err)) +
+  geom_vline(xintercept=min_err_65, color="skyblue") +
+  scale_x_log10() + 
+  labs(x = "K",
+        y = "RMSE", 
+        title = "RMSE versus K (trim = 65 AMG)") + 
+  theme_minimal()  +
+  theme(plot.title = element_text(hjust=0.5))
+
+
+```
+
+The plot below shows predicted price versus mileage for cars with trim levels AMG 65.
+
+```{r q3-5}
+# plot predictions vs x for k=21
+
+knn20 = knnreg(price ~ mileage, data=sclass_350_train, k=20)
+
+sclass_65_test = sclass_65_test %>%
+  mutate(price_pred = predict(knn20, sclass_65_test))
+
+ggplot(sclass_65_test) + 
+  geom_point(mapping = aes(x = mileage, y = price), alpha=0.5) + 
+  geom_line(aes(x = mileage, y = price_pred), color='skyblue', size=1.5) +
+  labs(title = "Predicted Price versus Mileage (trim = 65 AMG)", x = "Mileage", y = "Price") + 
+  theme_minimal()  +
+  theme(plot.title = element_text(hjust=0.5))
+
+
+```
+
+In conclusion, the Trim 65 AMG model, with optimal K value of 20, demonstrates a preference for a larger K value compared to the Trim 350 model, which has an optimal K value of 12. This distinction suggests that the Trim 65 AMG model benefits from a slightly higher level of complexity to accurately capture its underlying patterns, likely due to its data distribution or larger sample size.
+
+
