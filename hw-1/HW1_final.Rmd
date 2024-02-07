@@ -287,7 +287,7 @@ We used KNN model with K = 16 on the testing data to predict price based on mile
 
 ```{r q3-3}
 
-# plot predictions vs x for k=12
+# plot predictions vs x for k=16
 
 knn16 = knnreg(price ~ mileage, data=sclass_350_train, k=16)
 
@@ -306,7 +306,7 @@ ggplot(sclass_350_test) +
 
 ### Cars with trim level 65 AMG
 
-We performed similar procedures for cars with trim levels of 65 AMG. The K value with the minimum RMSE falls in the range of 9 to 30. To balance between bias and variance, K = 20 was chosen as the optimal K value. 
+We performed similar procedures for cars with trim levels of 65 AMG. The K value with the minimum RMSE also falls in the range of 8 to 20. To balance between bias and variance, K = 14 was chosen as the optimal K value. 
 
 ```{r q3-4}
 
@@ -351,12 +351,12 @@ ggplot(cv_grid_65) +
 The plot below shows predicted price versus mileage for cars with trim levels AMG 65.
 
 ```{r q3-5}
-# plot predictions vs x for k=21
+# plot predictions vs x for k=14
 
-knn20 = knnreg(price ~ mileage, data=sclass_350_train, k=20)
+knn14 = knnreg(price ~ mileage, data=sclass_350_train, k=14)
 
 sclass_65_test = sclass_65_test %>%
-  mutate(price_pred = predict(knn20, sclass_65_test))
+  mutate(price_pred = predict(knn14, sclass_65_test))
 
 ggplot(sclass_65_test) + 
   geom_point(mapping = aes(x = mileage, y = price), alpha=0.5) + 
@@ -368,6 +368,6 @@ ggplot(sclass_65_test) +
 
 ```
 
-In conclusion, the Trim 65 AMG model, with optimal K value of 20, demonstrates a preference for a larger K value compared to the Trim 350 model, which has an optimal K value of 12. This distinction suggests that the Trim 65 AMG model benefits from a slightly higher level of complexity to accurately capture its underlying patterns, likely due to its data distribution or larger sample size.
+In conclusion, the Trim 350 cars, with an optimal K value of 16, demonstrates a preference for a larger K value compared to the Trim 65 AMG cars, which has an optimal K value of 14. This distinction suggests that the Trim 350 cars benefit from a slightly higher level of complexity to accurately capture its underlying patterns. Upon examining the data set, we found that the Trim 350 sample is larger and has significantly smaller variance in the price variable, which is likely the reason it yields a higher optimal K value.
 
 
