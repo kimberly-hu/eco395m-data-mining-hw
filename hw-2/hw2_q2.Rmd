@@ -21,22 +21,17 @@ In problem 2, we are dealing with a data set from a German bank including inform
 
 ```{r barplot, echo=FALSE}
 
-credit = read.csv("german_credit.csv") 
+credit = read.csv("data/german_credit.csv", row.names = 1) 
 
-default_rate <- credit %>%
+default_rate = credit %>%
   group_by(history) %>%
   summarise(DefaultRate = mean(Default == 1))
 
-defaulted_rate <- aggregate(Default ~ history, data = credit, function(x) mean(x == 1))
-
-colnames(defaulted_rate)[2] <- "DefaultRate"
-
-ggplot(defaulted_rate, aes(x = history, y = DefaultRate)) +
+ggplot(default_rate, aes(x = history, y = DefaultRate)) +
   geom_bar(stat = "identity", fill = "skyblue") +
-  labs(title = "Defaulted Rate by Credit History", 
-       x = "Loan History", 
-       y = "Defaulted Rate") +
-  theme_minimal()+
+  labs(title = "Default Rate by Credit History", 
+       x = "Loan history", 
+       y = "Default rate") +
   theme(plot.title = element_text(hjust = 0.5))
 
 ```
@@ -51,20 +46,26 @@ Coefficients reported by logistic regression model:
 
 credit$installment <- factor(credit$installment)
 
-logit_model <- glm(Default ~ duration + amount + installment + age + history + purpose + foreign, 
-             data = credit, family = binomial)
+set.seed(123)
+credit_split = initial_split(credit, 0.8)
+credit_train = training(credit_split)
+credit_test = testing(credit_split)
+
+logit_model <- glm(Default ~ duration + amount + installment + age + history + purpose + foreign,
+                   data = credit_train, family = binomial)
 
 coef(logit_model) %>% round(2)
 
-phat_test = predict(logit_model, newdata = credit) 
+phat_test = predict(logit_model, newdata = credit_test) 
 yhat_test = ifelse(phat_test > 0.5, 1, 0)
-confusion_out_logit = table(y = credit$Default, yhat = yhat_test)
+confusion_out_logit = table(y = credit_test$Default, yhat = yhat_test)
 confusion_out_logit 
 
 ```
-According to the confusion matrix: error rate = (256+26)/1000=0.282, which indicates 72% accuracy. This is not a very high accuracy rate. 
 
-Although the coefficients to some extent indicate reasonable relationship between some characteristics, for example, the installment with defaulted probability, we can still see counter-intuitive factors, as well as an unsatisfactory accuracy rate of 72%. Combining the regression result and the bar plot, we can reasonably make a hypothesis that there's something in the data which prevents us from making successful predictions. 
+According to the confusion matrix: error rate = (4+60)/200=0.32, which indicates 68% accuracy. This is not a very high accuracy rate. 
+
+Although the coefficients to some extent indicate reasonable relationship between some characteristics, for example, the installment with defaulted probability, we can still see counter-intuitive factors, as well as an unsatisfactory accuracy rate of 68%. Combining the regression result and the bar plot, we can reasonably make a hypothesis that there's something in the data which prevents us from making successful predictions. 
 
 Calculate counts of samples falling into different categories:
 
