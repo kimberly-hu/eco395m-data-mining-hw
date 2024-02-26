@@ -261,9 +261,9 @@ ggplot(results_long, aes(x = fold, y = Value, color = Type, group = Type)) +
 mushroom = read.csv('data/mushrooms.csv')
 
 #mushroom %>%
-  select_if(~is.factor(.) | is.character(.)) %>%
-  map(~unique(.)) %>%
-  walk2(names(.), ~cat("Levels for", .y, ":", .x, "\n"))
+#  select_if(~is.factor(.) | is.character(.)) %>%
+#  map(~unique(.)) %>%
+#  walk2(names(.), ~cat("Levels for", .y, ":", .x, "\n"))
 
 # delete veil.type (only one level)
 mushroom = subset(mushroom, select = -c(veil.type))
@@ -282,7 +282,8 @@ mushroom_lasso = gamlr(mushroom_x, mushroom_y, family="binomial")
 plot(mushroom_lasso)
 
 # optimal lambda
-log(mushroom_lasso$lambda[which.min(AICc(mushroom_lasso))])
+optimal_lambda = log(mushroom_lasso$lambda[which.min(AICc(mushroom_lasso))])
+optimal_lambda
 
 ```
 
@@ -302,7 +303,26 @@ selected
 
 # prediction
 
-mushroom_logit <- glm(class ~ ., data = mushroom_train, family = binomial)
+mushroom_x_test = model.matrix(class ~ (. -1)^2, data=mushroom_test)
+
+phat_mushroom = predict(mushroom_lasso, mushroom_x_test, type='response')
+
+yhat_mushroom = ifelse(phat_mushroom > 0.5, 1, 0)
+
+confusion_mushroom = table(y = mushroom_test$class, 
+                           yhat = yhat_mushroom)
+confusion_mushroom
+
+```
+
+
+```{r}
+
+# ROC curve
+
 
 
 ```
+
+
+
