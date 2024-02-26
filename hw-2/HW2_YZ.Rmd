@@ -62,7 +62,7 @@ out_lasso = do(100)*{
   saratoga_X_test = model.matrix(price ~ . -1 + lotSize^2 + age^2 + landValue^2 + livingArea^2 + pctCollege^2, data = saratoga_test)
   saratoga_y_test = saratoga_test$price
   
-  saratoga_lasso_predicted = predict(saratoga_cv_lasso, newx = saratoga_X_test, s = "lambda.min")
+  saratoga_lasso_predicted = predict(saratoga_lasso, newx = saratoga_X_test)
   saratoga_lasso_residuals = saratoga_y_test - saratoga_lasso_predicted
   
   rmse_lasso = sqrt(mean(saratoga_lasso_residuals^2))
