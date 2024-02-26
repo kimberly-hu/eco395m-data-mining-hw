@@ -1,0 +1,308 @@
+---
+title: "ECO395M Homework 2"
+author: "Kimberly Hu"
+date: "2024-02-25"
+output: md_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      out.width = "75%", out.height = "75%")
+```
+
+```{r packages}
+library(tidyverse)
+library(ggplot2)
+library(modelr)
+library(rsample)
+library(mosaic)
+library(gamlr)
+library(lubridate)
+library(pROC)
+library(foreach)
+
+```
+
+
+## 3. Children and hotel reservations
+
+```{r q3-1}
+
+hotels_dev = read.csv('data/hotels_dev.csv')
+hotels_val = read.csv('data/hotels_val.csv')
+
+```
+
+### Model building
+
+We are interested in building a model that predicts whether a hotel booking will have children on it. To evaluate the performance of our model, we first built two baseline models.  
+1. Logistic regression model with the following predictors: `market_segment`, `adults`, `customer_type`, `is_repeated_guest`
+2. Logistic regression model that uses all the existing predictors except `arrival_date`
+
+```{r q3-2}
+
+hotels_dev_split = initial_split(hotels_dev, prop = 0.8)
+hotels_dev_train = training(hotels_dev_split)
+hotels_dev_test = testing(hotels_dev_split)
+
+# baseline model 1
+hotels_logit1 = glm(children ~ market_segment + adults + customer_type + is_repeated_guest, data=hotels_dev_train, family=binomial)
+
+# baseline model 2
+hotels_logit2 = glm(children ~ . - arrival_date, data=hotels_dev_train, family=binomial)
+
+```
+
+`arrival_date` is a character variable that is difficult to incorporate directly into the model. We extracted the variable `month` from `arrival_date`, which is a factor of 12 levels, and included it as an additional predictor. 
+It also makes sense to include some interaction terms in our model. Before generating interactions, we used Lasso to exclude the main effects with coefficients of zero, to avoid generating redundant interactions. The variables are listed below. 
+
+```{r q3-3}
+
+# extract month from date
+hotels_dev_train$month = as.factor(substr(hotels_dev_train$arrival_date, 6, 7))
+hotels_dev_test$month = as.factor(substr(hotels_dev_test$arrival_date, 6, 7))
+
+# select features using Lasso
+hotels_dev_x = model.matrix(children ~ . - 1 - arrival_date, data=hotels_dev_train)
+hotels_dev_y = hotels_dev_train$children
+
+hotel_lasso = gamlr(hotels_dev_x, hotels_dev_y, family="binomial")
+
+coef_hotel_lasso = coef(hotel_lasso) %>% 
+  as.matrix() %>% 
+  as.data.frame()
+
+# main effects in coef_zero are eliminated
+coef_zero = rownames(filter(coef_hotel_lasso, seg100==0))
+coef_zero
+
+# model 3 - unused
+# hotels_logit3 = glm(children ~ . - arrival_date - meal - previous_cancellations - deposit_type - month, data=hotels_dev_train, family=binomial)
+
+```
+
+Based on the results from multiple train-test splits, we decided to drop `previous_cancellations` and `deposit_type`, and retained the categorical variables that have some levels with zero coefficients but others non-zero. A second Lasso was performed to select the most effective interactions terms (those that have betas), which are listed below. 
+
+```{r q3-4}
+
+# Lasso with interaction terms
+hotels_dev_x_inter = model.matrix(children ~ (. - 1 - arrival_date - previous_cancellations - deposit_type)^2, data=hotels_dev_train)
+
+hotel_lasso_inter = gamlr(hotels_dev_x_inter, hotels_dev_y, family="binomial")
+
+coef_hotel_lasso_inter = coef(hotel_lasso_inter) %>% 
+  as.matrix() %>% 
+  as.data.frame() %>%
+  arrange(desc(seg100))
+
+inter_terms = c("reserved_room_type:assigned_room_type", "market_segment:assigned_room_type", "market_segment:reserved_room_type", "hotel:reserved_room_type", "meal:reserved_room_type", "reserved_room_type:month", "assigned_room_type:month")
+inter_terms
+
+# model 3 with picked main effects and interactions
+hotels_logit3 = glm(children ~ (. - arrival_date - previous_cancellations - deposit_type + reserved_room_type:assigned_room_type + market_segment:assigned_room_type + market_segment:reserved_room_type + hotel:reserved_room_type + meal:reserved_room_type + reserved_room_type:month + assigned_room_type:month), data=hotels_dev_train)
+
+```
+
+Our final model consists of all the main effects except for `arrival_date`, `previous_cancellations` and  `deposit_type`, plus `month` and the interaction terms listed. We produced confusion matrices and calculated TPR, FPR and FDR for the three models. Our model outperforms the baseline models by correctly predicting more positives as well as more negatives. 
+
+```{r q3-5}
+
+# fix problem of unrepresented categories in predict
+is.prone <- function(x) is.factor(x) | is.character(x)
+id <- sapply(hotels_dev, is.prone)
+hotels_logit2$xlevels <- Map(union, hotels_logit2$xlevels, lapply(hotels_dev[id], unique))
+hotels_logit3$xlevels <- Map(union, hotels_logit3$xlevels, lapply(hotels_dev[id], unique))
+
+
+# prediction and confusion matrix
+
+phat_hotels_logit1 = predict(hotels_logit1, hotels_dev_test, type='response')
+yhat_hotels_logit1 = ifelse(phat_hotels_logit1 > 0.5, 1, 0)
+confusion_out_hotels_logit1 = table(y = hotels_dev_test$children,
+                                    yhat = yhat_hotels_logit1)
+
+phat_hotels_logit2 = predict(hotels_logit2, hotels_dev_test, type='response')
+yhat_hotels_logit2 = ifelse(phat_hotels_logit2 > 0.5, 1, 0)
+confusion_out_hotels_logit2 = table(y = hotels_dev_test$children,
+                                    yhat = yhat_hotels_logit2)
+
+phat_hotels_logit3 = predict(hotels_logit3, hotels_dev_test, type='response')
+yhat_hotels_logit3 = ifelse(phat_hotels_logit3 > 0.5, 1, 0)
+confusion_out_hotels_logit3 = table(y = hotels_dev_test$children,
+                                    yhat = yhat_hotels_logit3)
+
+confusion_matrices <- list(
+  "Model 1" = confusion_out_hotels_logit1,
+  "Model 2" = confusion_out_hotels_logit2,
+  "Model 3" = confusion_out_hotels_logit3
+)
+
+print_confusion_matrices <- function(confusion_list) {
+  for (model_name in names(confusion_list)) {
+    cat(model_name, "Confusion Matrix:\n")
+    print(confusion_list[[model_name]])
+    cat("\n")
+  }
+}
+
+print_confusion_matrices(confusion_matrices)
+
+```
+
+```{r q3-6}
+
+# evaluation
+
+models = list(
+  model1 = c(TP = 0, FP = 0, TN = confusion_out_hotels_logit1[1,1], FN = confusion_out_hotels_logit1[2,1]),
+  model2 = c(TP = confusion_out_hotels_logit2[2,2], FP = confusion_out_hotels_logit2[1,2], TN = confusion_out_hotels_logit2[1,1], FN = confusion_out_hotels_logit2[2,1]),
+  model3 = c(TP = confusion_out_hotels_logit3[2,2], FP = confusion_out_hotels_logit3[1,2], TN = confusion_out_hotels_logit3[1,1], FN = confusion_out_hotels_logit3[2,1])
+)
+
+metrics = lapply(models, function(x) {
+  TPR = x['TP'] / (x['TP'] + x['FN'])
+  FPR = x['FP'] / (x['FP'] + x['TN'])
+  FDR = x['FP'] / (x['FP'] + x['TP'])
+  result = c(TPR = TPR, FPR = FPR, FDR = FDR)
+  names(result) <- c("TPR", "FPR", "FDR")
+  return(result)
+})
+
+metrics_df = do.call(rbind, metrics)
+rownames(metrics_df) = paste("Model", 1:3)
+metrics_df
+
+```
+
+### Model validation step 1
+
+We validated our model using the validation data set. The ROC curve is shown below. The curve lies above the straight line, which means that the model makes better predictions than random guesses. 
+
+```{r q3-7}
+
+# predict using validation data
+
+hotels_val$month = as.factor(substr(hotels_val$arrival_date, 6, 7))
+
+phat_hotels_val = predict(hotels_logit3, hotels_val, type='response')
+y_hotels_val = hotels_dev_test$children
+
+# calculate TPR and FPR for each threshold
+
+thresholds = seq(0, 1, by=0.01)
+tpr_values = numeric(length(thresholds))
+fpr_values = numeric(length(thresholds))
+
+for (i in seq_along(thresholds)) {
+  threshold = thresholds[i]
+  
+  predicted_classes = ifelse(phat_hotels_val > threshold, 1, 0)
+  
+  TP = sum(predicted_classes == 1 & y_hotels_val == 1)
+  FP = sum(predicted_classes == 1 & y_hotels_val == 0)
+  TN = sum(predicted_classes == 0 & y_hotels_val == 0)
+  FN = sum(predicted_classes == 0 & y_hotels_val == 1)
+  
+  tpr_values[i] = TP / (TP + FN)
+  fpr_values[i] = FP / (FP + TN)
+}
+
+# plot ROC curve
+
+plot(fpr_values, tpr_values, type = "l", col = "blue",
+     xlab = "False Positive Rate (FPR)", ylab = "True Positive Rate (TPR)",
+     main = "ROC Curve")
+
+abline(a = 0, b = 1, lty = 2, col = "red")
+
+
+```
+
+### Model validation step 2
+
+By performing predictions for 20 folds and summing up the predictions within each fold, we found that our model consistently under-predicts the number of booking with children. The plot below compares the actual values and predicted values. This is still a lot of room for improvement. 
+
+```{r q3-8}
+
+folds = 20
+
+hotels_val = hotels_val %>%
+  mutate(fold_id = sample(rep(1:folds, length.out = nrow(hotels_val))))
+
+hotels_val_cv = foreach(fold = 1:folds, .combine='rbind') %do% {
+  hotel_val_folds = filter(hotels_val, fold_id == fold)
+  hotel_val_folds_phat = predict(hotels_logit3, hotel_val_folds, type = "response")
+  hotel_val_folds_yhat = ifelse(hotel_val_folds_phat > 0.5, 1, 0)
+  c(sum_y=sum(hotel_val_folds$children), sum_yhat=sum(hotel_val_folds_yhat))
+} %>% as.data.frame()
+
+hotels_val_cv$fold = 1:nrow(hotels_val_cv)
+
+results_long = pivot_longer(hotels_val_cv, cols = c(sum_y, sum_yhat), names_to = "Type", values_to = "Value")
+results_long$fold <- as.factor(results_long$fold)
+
+ggplot(results_long, aes(x = fold, y = Value, color = Type, group = Type)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Actual vs. Predicted Bookings with Children",
+       x = "Fold", y = "Number of bookings with children") +
+  scale_color_manual(values = c("sum_y" = "blue", "sum_yhat" = "red"), 
+                     labels = c("Actual", "Predicted"))
+
+
+```
+
+
+## Mushroom classification
+
+
+```{r 4-1}
+
+mushroom = read.csv('data/mushrooms.csv')
+
+#mushroom %>%
+  select_if(~is.factor(.) | is.character(.)) %>%
+  map(~unique(.)) %>%
+  walk2(names(.), ~cat("Levels for", .y, ":", .x, "\n"))
+
+# delete veil.type (only one level)
+mushroom = subset(mushroom, select = -c(veil.type))
+
+mushroom <- mushroom %>%
+  mutate_if(is.character, as.factor)
+
+mushroom_split = initial_split(mushroom, prop = 0.8)
+mushroom_train = training(mushroom_split)
+mushroom_test = testing(mushroom_split)
+
+mushroom_x = model.matrix(class ~ (. -1)^2, data=mushroom_train)
+mushroom_y = mushroom_train$class
+
+mushroom_lasso = gamlr(mushroom_x, mushroom_y, family="binomial")
+plot(mushroom_lasso)
+
+# optimal lambda
+log(mushroom_lasso$lambda[which.min(AICc(mushroom_lasso))])
+
+```
+
+```{r}
+
+# coef
+mushroom_beta = coef(mushroom_lasso) %>% 
+  as.matrix() %>%
+  as.data.frame() %>%
+  filter(seg100 != 0)
+selected = rownames(mushroom_beta)
+selected
+
+```
+
+```{r}
+
+# prediction
+
+mushroom_logit <- glm(class ~ ., data = mushroom_train, family = binomial)
+
+
+```
