@@ -1,0 +1,101 @@
+---
+title: "HW2_question1"
+output: pdf_document
+date: "2024-02-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Linear model
+
+We use the LASSO model with 10-fold cross-validation. Comparing the RMSE_out, we can tell that  the LASSO model (RMSE_out= 58016.81) clearly outperform the "medium" model(RMSE_out= 69233.8).
+```{r Linear_model}
+
+library(glmnet)
+library(tidyverse)
+library(mosaic)
+library(foreach)
+library(modelr)
+library(rsample)
+
+## baseline medium model with 11 main effects
+saratoga_split = initial_split(SaratogaHouses, prop = 0.8)
+saratoga_train = training(saratoga_split)
+saratoga_test = testing(saratoga_split)
+
+lm_medium = lm(price ~ lotSize + age + livingArea + pctCollege + bedrooms + 
+		fireplaces + bathrooms + rooms + heating + fuel + centralAir, data=saratoga_train)
+print(rmse(lm_medium, saratoga_test)) #RMSE of medium model
+
+
+
+## better linear model
+data(SaratogaHouses)
+
+# create model matrix
+X <- model.matrix(price ~ . -1, data = SaratogaHouses)
+y <- SaratogaHouses$price
+
+# alpha = 1 (Lasso)
+lasso <- glmnet(X, y, alpha = 1)
+
+cv.lasso <- cv.glmnet(X, y, type = "mse", alpha = 1) #  By default, cv.glmnet performs 10-fold cross-validation
+
+coef(cv.lasso, s = "lambda.min")
+
+# Predict using the Lasso model at the optimal lambda value
+predicted <- predict(cv.lasso, newx = X, s = "lambda.min")
+
+# Calculate residuals (difference between actual and predicted values)
+residuals <- y - predicted
+
+# Calculate RMSE
+rmse <- sqrt(mean(residuals^2))
+
+# Print the RMSE
+print(rmse)
+
+
+
+```
+
+## KNN model
+
+we choose the variables price + lotSize + age + sewer + waterfront + landValue + newConstruction(choose manually) normalize the data and use 5-fold cross validation to fit the KNN model. "tuneLength = 100" instructs the train function to consider 100 different values of K when selecting the best K value. RMSE of KNN clearly larger than RMSE of LASSO.
+```{r KNN_model}
+
+  #split the data
+  saratoga_split = initial_split(SaratogaHouses, prop = 0.8)
+  saratoga_train = training(saratoga_split)
+  saratoga_test = testing(saratoga_split)
+  
+  #Normalize
+  Xtrain = model.matrix(~ . - (price+ + lotSize + age + sewer + waterfront + landValue + newConstruction) - 1, data=saratoga_train)
+  Xtest = model.matrix(~ . - (price+ lotSize +age + sewer + waterfront + landValue + newConstruction) - 1, data=saratoga_test)
+  
+  # training and testing set responses
+  ytrain = saratoga_train$price
+  ytest = saratoga_test$price
+  
+  #now rescale:
+  scale_train = apply(Xtrain, 2, sd)  # calculate std dev for each column
+  Xtilde_train = scale(Xtrain, scale = scale_train)
+  Xtilde_test = scale(Xtest, scale = scale_train)  # use the training set scales!
+  
+  #run the KNN model
+  ctrl <- trainControl(method="repeatedcv", number = 5, repeats = 3)
+  knnfit <- train(Xtilde_train,
+                   ytrain,
+                   method = "knn",
+                   trControl = ctrl,
+                   tunelength = 100)
+  y_predict <- predict(knnfit, Xtilde_test)
+  knn_errors = c(RMSE(ytest, y_predict))
+
+print(knn_errors)
+
+
+```
+
