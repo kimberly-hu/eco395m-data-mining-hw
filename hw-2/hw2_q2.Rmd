@@ -1,0 +1,86 @@
+---
+title: "hw2_q2"
+output:
+  word_document: default
+  html_document: default
+date: "2024-02-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(nnet)
+
+```
+
+## 2. Classification and retrospective sampling
+
+In problem 2, we are dealing with a data set from a German bank including information about loans. Our goal is to investigate how predict default probability is related to some other characteristics of defaulted loans, and try to make predictions based on information we have.
+
+```{r barplot, echo=FALSE}
+
+credit = read.csv("german_credit.csv") 
+
+default_rate <- credit %>%
+  group_by(history) %>%
+  summarise(DefaultRate = mean(Default == 1))
+
+defaulted_rate <- aggregate(Default ~ history, data = credit, function(x) mean(x == 1))
+
+colnames(defaulted_rate)[2] <- "DefaultRate"
+
+ggplot(defaulted_rate, aes(x = history, y = DefaultRate)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "Defaulted Rate by Credit History", 
+       x = "Loan History", 
+       y = "Defaulted Rate") +
+  theme_minimal()+
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+The bar plot above describes the defaulted rate categorized by different levels of credit history. There are three levels of history: "Good", "Poor", and "Terrible". By observing the plot we can see that among three levels of credit history, the loans with "Good" history have the highest defaulted rate, while the loans with "Terrible" history have the lowest defaulted rate. This result is counter-intuitive, because it suggests that better credit history is related to higher loan defaulted rate. 
+
+Now we are going to build a prediction model with logistic regression and see if it is a good prediction of the defaulted rate. 
+
+Coefficients reported by logistic regression model:
+
+```{r regression, echo=FALSE}
+
+credit$installment <- factor(credit$installment)
+
+logit_model <- glm(Default ~ duration + amount + installment + age + history + purpose + foreign, 
+             data = credit, family = binomial)
+
+coef(logit_model) %>% round(2)
+
+phat_test = predict(logit_model, newdata = credit) 
+yhat_test = ifelse(phat_test > 0.5, 1, 0)
+confusion_out_logit = table(y = credit$Default, yhat = yhat_test)
+confusion_out_logit 
+
+```
+According to the confusion matrix: error rate = (256+26)/1000=0.282, which indicates 72% accuracy. This is not a very high accuracy rate. 
+
+Although the coefficients to some extent indicate reasonable relationship between some characteristics, for example, the installment with defaulted probability, we can still see counter-intuitive factors, as well as an unsatisfactory accuracy rate of 72%. Combining the regression result and the bar plot, we can reasonably make a hypothesis that there's something in the data which prevents us from making successful predictions. 
+
+Calculate counts of samples falling into different categories:
+
+```{r count, echo=FALSE}
+
+num_good <- sum(credit$history == "good")
+print(paste("Number of 'good' credit history = ", num_good))
+num_poor <- sum(credit$history == "poor")
+print(paste("Number of 'poor' credit history = ", num_poor))
+num_terrible <- sum(credit$history == "terrible") 
+print(paste("Number of 'terrible' credit history = ", num_terrible))
+
+```
+
+
+Here we can see a huge gap between counts. That is to say, oversampling of some certain categories in the data may potentially be the reason why counter-intuitive statistical results occur. The loans with "good" credit history are underrepresented in the data, and a large portion of them happen to be defaulted loans. This problem may have been caused by how the data was originally selected. Since the loans in the data set was manually selected based on whether the loans have similar situations as the defaulted loans, these loans in the data set cannot represent the real life distribution of borrowers. 
+
+Thus, this data set is an inappropriate one for building a predictive model for defaults. To classify borrowers into "low" and "high" defaulted probability categories, the bank needs a data set which more accurately represents the real distribution and situations of the potential borrowers. For example, randomized sampling can be a good way to achieve this. 
+
