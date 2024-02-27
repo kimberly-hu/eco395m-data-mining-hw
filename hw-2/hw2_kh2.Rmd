@@ -17,9 +17,11 @@ library(modelr)
 library(rsample)
 library(mosaic)
 library(gamlr)
+library(glmnet)
 library(lubridate)
 library(pROC)
 library(foreach)
+library(caret)
 
 ```
 
@@ -31,16 +33,35 @@ library(foreach)
 hotels_dev = read.csv('data/hotels_dev.csv')
 hotels_val = read.csv('data/hotels_val.csv')
 
+# covert some character variables to factors
+
+#columns_to_convert = c("hotel", "children", "meal", "market_segment", "distribution_channel", #"is_repeated_guest", "reserved_room_type", "assigned_room_type", "deposit_type", #"customer_type", "required_car_parking_spaces")
+
+#hotels_dev[columns_to_convert] <- lapply(hotels_dev[columns_to_convert], as.factor)
+#hotels_val[columns_to_convert] <- lapply(hotels_val[columns_to_convert], as.factor)
+
+#factor_vars <- sapply(hotels_dev, is.factor)
+#for(var in names(factor_vars[factor_vars])) {
+#  levels(hotels_dev[[var]]) <- make.names(levels(hotels_dev[[var]]), unique = TRUE)
+#}
+
+#factor_vars <- sapply(hotels_val, is.factor)
+#for(var in names(factor_vars[factor_vars])) {
+#  levels(hotels_val[[var]]) <- make.names(levels(hotels_val[[var]]), unique = TRUE)
+#}
+
+
 ```
 
 ### Model building
 
 We are interested in building a model that predicts whether a hotel booking will have children on it. To evaluate the performance of our model, we first built two baseline models.  
-1. Logistic regression model with the following predictors: `market_segment`, `adults`, `customer_type`, `is_repeated_guest`
+1. Logistic regression model with the following predictors: `market_segment`, `adults`, `customer_type`, `is_repeated_guest`  
 2. Logistic regression model that uses all the existing predictors except `arrival_date`
 
 ```{r q3-2}
 
+set.seed(123)
 hotels_dev_split = initial_split(hotels_dev, prop = 0.8)
 hotels_dev_train = training(hotels_dev_split)
 hotels_dev_test = testing(hotels_dev_split)
@@ -53,8 +74,7 @@ hotels_logit2 = glm(children ~ . - arrival_date, data=hotels_dev_train, family=b
 
 ```
 
-`arrival_date` is a character variable that is difficult to incorporate directly into the model. We extracted the variable `month` from `arrival_date`, which is a factor of 12 levels, and included it as an additional predictor. 
-It also makes sense to include some interaction terms in our model. Before generating interactions, we used Lasso to exclude the main effects with coefficients of zero, to avoid generating redundant interactions. The variables are listed below. 
+A better model was built using lasso-penalized logistic regression. `arrival_date` is a character variable that is difficult to incorporate directly into the model, so we extracted the variable `month` from `arrival_date`, which is a factor of 12 levels. We also included interactions between all main effects in our model. 
 
 ```{r q3-3}
 
@@ -62,59 +82,32 @@ It also makes sense to include some interaction terms in our model. Before gener
 hotels_dev_train$month = as.factor(substr(hotels_dev_train$arrival_date, 6, 7))
 hotels_dev_test$month = as.factor(substr(hotels_dev_test$arrival_date, 6, 7))
 
-# select features using Lasso
+# Lasso model
 hotels_dev_x = model.matrix(children ~ . - 1 - arrival_date, data=hotels_dev_train)
 hotels_dev_y = hotels_dev_train$children
 
-hotel_lasso = gamlr(hotels_dev_x, hotels_dev_y, family="binomial")
+hotels_logit3 = gamlr(hotels_dev_x, hotels_dev_y, family="binomial")
 
-coef_hotel_lasso = coef(hotel_lasso) %>% 
-  as.matrix() %>% 
-  as.data.frame()
+hotels_lasso = glmnet(hotels_dev_x, hotels_dev_y, alpha = 1)
 
-# main effects in coef_zero are eliminated
-coef_zero = rownames(filter(coef_hotel_lasso, seg100==0))
-coef_zero
-
-# model 3 - unused
-# hotels_logit3 = glm(children ~ . - arrival_date - meal - previous_cancellations - deposit_type - month, data=hotels_dev_train, family=binomial)
+hotels_dev_x_test = model.matrix(children ~ . - 1 - arrival_date, data=hotels_dev_test)
+hotels_dev_y_test = hotels_dev_test$children
+  
+phat_hotels_lasso = predict(hotels_lasso, newx = hotels_dev_x_test)
 
 ```
 
-Based on the results from multiple train-test splits, we decided to drop `previous_cancellations` and `deposit_type`, and retained the categorical variables that have some levels with zero coefficients but others non-zero. A second Lasso was performed to select the most effective interactions terms (those that have betas), which are listed below. 
-
-```{r q3-4}
-
-# Lasso with interaction terms
-hotels_dev_x_inter = model.matrix(children ~ (. - 1 - arrival_date - previous_cancellations - deposit_type)^2, data=hotels_dev_train)
-
-hotel_lasso_inter = gamlr(hotels_dev_x_inter, hotels_dev_y, family="binomial")
-
-coef_hotel_lasso_inter = coef(hotel_lasso_inter) %>% 
-  as.matrix() %>% 
-  as.data.frame() %>%
-  arrange(desc(seg100))
-
-inter_terms = c("reserved_room_type:assigned_room_type", "market_segment:assigned_room_type", "market_segment:reserved_room_type", "hotel:reserved_room_type", "meal:reserved_room_type", "reserved_room_type:month", "assigned_room_type:month")
-inter_terms
-
-# model 3 with picked main effects and interactions
-hotels_logit3 = glm(children ~ (. - arrival_date - previous_cancellations - deposit_type + reserved_room_type:assigned_room_type + market_segment:assigned_room_type + market_segment:reserved_room_type + hotel:reserved_room_type + meal:reserved_room_type + reserved_room_type:month + assigned_room_type:month), data=hotels_dev_train)
-
-```
-
-Our final model consists of all the main effects except for `arrival_date`, `previous_cancellations` and  `deposit_type`, plus `month` and the interaction terms listed. We produced confusion matrices and calculated TPR, FPR and FDR for the three models. Our model outperforms the baseline models by correctly predicting more positives as well as more negatives. 
+We produced confusion matrices and calculated TPR, FPR and FDR for the three models. Our model outperforms the baseline models by correctly predicting more positives as well as more negatives. 
 
 ```{r q3-5}
 
 # fix problem of unrepresented categories in predict
-is.prone <- function(x) is.factor(x) | is.character(x)
-id <- sapply(hotels_dev, is.prone)
-hotels_logit2$xlevels <- Map(union, hotels_logit2$xlevels, lapply(hotels_dev[id], unique))
-hotels_logit3$xlevels <- Map(union, hotels_logit3$xlevels, lapply(hotels_dev[id], unique))
+#is.prone <- function(x) is.factor(x)
+#id <- sapply(hotels_dev, is.prone)
+#hotels_logit2$xlevels <- Map(union, hotels_logit2$xlevels, lapply(hotels_dev[id], unique))
+#hotels_logit3$xlevels <- Map(union, hotels_logit3$xlevels, lapply(hotels_dev[id], unique))
 
-
-# prediction and confusion matrix
+# prediction
 
 phat_hotels_logit1 = predict(hotels_logit1, hotels_dev_test, type='response')
 yhat_hotels_logit1 = ifelse(phat_hotels_logit1 > 0.5, 1, 0)
@@ -126,10 +119,15 @@ yhat_hotels_logit2 = ifelse(phat_hotels_logit2 > 0.5, 1, 0)
 confusion_out_hotels_logit2 = table(y = hotels_dev_test$children,
                                     yhat = yhat_hotels_logit2)
 
-phat_hotels_logit3 = predict(hotels_logit3, hotels_dev_test, type='response')
+hotels_dev_x_test = model.matrix(children ~ . - 1 - arrival_date, data=hotels_dev_test)
+
+phat_hotels_logit3 = predict(hotels_logit3, hotels_dev_x_test, type='response')
 yhat_hotels_logit3 = ifelse(phat_hotels_logit3 > 0.5, 1, 0)
 confusion_out_hotels_logit3 = table(y = hotels_dev_test$children,
                                     yhat = yhat_hotels_logit3)
+
+
+# confusion matrix
 
 confusion_matrices <- list(
   "Model 1" = confusion_out_hotels_logit1,
@@ -184,8 +182,9 @@ We validated our model using the validation data set. The ROC curve is shown bel
 
 hotels_val$month = as.factor(substr(hotels_val$arrival_date, 6, 7))
 
-phat_hotels_val = predict(hotels_logit3, hotels_val, type='response')
-y_hotels_val = hotels_dev_test$children
+hotels_val_x = model.matrix(children ~ (. - 1 - arrival_date)^2, data=hotels_val)
+phat_hotels_logit3 = predict(hotels_logit3, hotels_val_x, type='response')
+y_hotels_val = hotels_val$children
 
 # calculate TPR and FPR for each threshold
 
@@ -342,6 +341,5 @@ cat("False Positive Rate:", FPR, "\n")
 
 
 ```
-
 
 
