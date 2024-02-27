@@ -8,6 +8,7 @@ date: "2024-02-26"
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+
 ```{r}
 library(glmnet)
 library(tidyverse)
@@ -16,14 +17,25 @@ library(foreach)
 library(modelr)
 library(rsample)
 library(caret)
-
 ```
 
-## Linear model
+# Q1 Saratoga house prices
 
-We use the LASSO model with 10-fold cross-validation. Comparing the RMSE_out, we can tell that  the LASSO model (RMSE_out= 58016.81) clearly outperform the "medium" model(RMSE_out= 69233.8).
+## Property Valuation and Taxation Report
 
-```{r}
+### Executive Summary
+
+This report presents the methodologies and findings from our analysis aimed at predicting property prices within the jurisdiction, to assist the local taxing authority in forming accurate market valuations for taxation purposes. Utilizing the SaratogaHouses dataset as a basis for our models, we employed three main predictive strategies: baseline linear model, Lasso regression model and KNN model. Our objective was to identify the most accurate and reliable model for property valuation by comparing the performance of each model, to ensure fair and equitable taxation.
+
+### Methodology
+
+#### 1. Baseline model
+
+We started with a baseline medium linear model including 11 main effects as predictors of SaratogaHouses dataset. After spliting the data into training and testing data, we used 100 different train-test splits to obtain an estimate of its average out-of-sample RMSE across these splits.
+
+Estimate of out-of-sample RMSE for linear baseline model:
+
+```{r q1-1}
 
 data(SaratogaHouses)
 
@@ -44,8 +56,13 @@ colMeans(out_lm)
 
 ```
 
+#### 2. Lasso model
 
-```{r}
+To improve the prediction of property prices, a Lasso regression model was utilized. We divided the SaratogaHouses dataset into training and testing subsets. In deciding which variables to include in the Lasso model, we observed that variables with quadratic terms generally outperformed those with interaction terms. Upon examining the dataset, we chose variables with significant numerical relevance, including lotSize, age, landValue, livingArea, and pctCollege, as our quadratic terms. We then fitted a Lasso model to the training data. This process was repeated 100 times to ensure the model's robustness, with the average out-of-sample RMSE from all iterations serving as a measure of the model's overall performance.
+
+Estimate of out-of-sample RMSE for the Lasso model:
+
+```{r q1-2}
 
 # better linear model using Lasso
 # include some quadratic terms
@@ -74,10 +91,15 @@ colMeans(out_lasso)
 
 ```
 
-## KNN model
+The result indicates that the Lasso model outperform the "medium" model by achieving lower out-of-sample RMSE.
 
-we choose the variables price + lotSize + age + sewer + waterfront + landValue + newConstruction(choose manually) normalize the data and use 5-fold cross validation to fit the KNN model. "tuneLength = 100" instructs the train function to consider 100 different values of K when selecting the best K value. RMSE of KNN clearly larger than RMSE of LASSO.
-```{r KNN_model}
+#### 3. KNN model
+
+Finally we used KNN to predict house prices. The dataset was divided into training and testing data. For model construction, we selected the same variables and quadratic terms that were used in the Lasso regression. The KNN model was trained on the scaled training data, employing 5-fold cross-validation, with 100 different numbers of neighbors (k values) being tested to determine the optimal k value. The model's predictive accuracy was assessed on the testing set using average out-of-sample RMSE. 
+
+Estimate of out-of-sample RMSE for KNN model:
+
+```{r q1-3}
 
 # KNN model
 # use all variables and some quadratics
@@ -109,4 +131,8 @@ print(knn_errors)
 
 
 ```
+
+### Conclusion
+
+In our comparative analysis of three predictive models, the K-Nearest Neighbors (KNN) model emerged as the most accurate, achieving the lowest out-of-sample RMSE and evidently outperforming both the Lasso and baseline "medium" linear models. This indicates that KNN, with its adaptability to data's intricacies, is the most reliable method for predicting property prices, making it the recommended choice for accurately determining market values for taxation purposes.
 

@@ -1,0 +1,325 @@
+---
+title: "ECO395M Homework 2"
+author: "Kimberly Hu, Meilin Li, Yueting Zhang"
+date: "2024-02-28"
+output: md_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, 
+                      out.width = "75%", out.height = "75%")
+options(width = 75)
+```
+
+```{r packages}
+library(tidyverse)
+library(ggplot2)
+library(modelr)
+library(rsample)
+library(mosaic)
+library(gamlr)
+library(glmnet)
+library(lubridate)
+library(pROC)
+library(foreach)
+library(caret)
+library(nnet)
+
+```
+
+# ECO395M Homework 2
+### Kimberly Hu, Meilin Li, Yueting Zhang
+### 2/8/2024
+
+
+## 1. Saratoga house prices
+
+This report presents the methodologies and findings from our analysis aimed at predicting property prices within the jurisdiction, to assist the local taxing authority in forming accurate market valuations for taxation purposes. Utilizing the SaratogaHouses data set as a basis for our models, we constructed a Lasso linear regression model and a K-nearest-neighbor regression model. Our objective was to identify the most accurate and reliable model for property valuation by comparing the out-of-sample performance of each model. 
+
+### Baseline model
+
+We started with a baseline linear model including 11 main effects as predictors of price. After training models and making predictions repeatedly for 100 times, we obtained an estimate of the average out-of-sample RMSE. RMSE measures the average magnitude of prediction errors and reflects deviations from the actual value. This value serves as a baseline for performance measurement of our models.  
+
+Estimate of out-of-sample RMSE for baseline model:
+
+```{r q1-1}
+
+data(SaratogaHouses)
+
+# baseline medium model with 11 main effects
+# calculate the average rmse over 100 train-test splits
+
+out_lm = do(100)*{
+  saratoga_split = initial_split(SaratogaHouses, prop = 0.8)
+  saratoga_train = training(saratoga_split)
+  saratoga_test = testing(saratoga_split)
+  saratoga_lm = lm(price ~ lotSize + age + livingArea + pctCollege + bedrooms + 
+		fireplaces + bathrooms + rooms + heating + fuel + centralAir, data=saratoga_train)
+  rmse_lm = rmse(saratoga_lm, saratoga_test)
+  c(rmse_lm)
+}
+
+colMeans(out_lm)
+
+```
+
+### Lasso model
+
+A Lasso regression model was utilized improve the prediction of property prices. In deciding which variables to include in the Lasso model, we observed that models with quadratic terms generally outperformed those with interaction terms. Upon examining the data set, we chose variables with significant numerical relevance, including lotSize, age, landValue, livingArea, and pctCollege, as our variables with quadratic terms. We also included all the main effects in our model. The model was fitted 100 times to ensure robustness, with the average out-of-sample RMSE from all iterations serving as a measure of the model's overall performance. The result indicates that the Lasso model outperforms the baseline model by achieving lower average RMSE, in other words, making lower prediction errors.
+
+Estimate of out-of-sample RMSE for the Lasso model:
+
+```{r q1-2}
+
+# better linear model using Lasso
+# include some quadratic terms
+
+out_lasso = do(100)*{
+  saratoga_split = initial_split(SaratogaHouses, prop = 0.8)
+  saratoga_train = training(saratoga_split)
+  saratoga_test = testing(saratoga_split)
+  
+  saratoga_X_train = model.matrix(price ~ . -1 + lotSize^2 + age^2 + landValue^2 + livingArea^2 + pctCollege^2, data = saratoga_train)
+  saratoga_y_train = saratoga_train$price
+  saratoga_lasso = glmnet(saratoga_X_train, saratoga_y_train, alpha = 1)
+
+  saratoga_X_test = model.matrix(price ~ . -1 + lotSize^2 + age^2 + landValue^2 + livingArea^2 + pctCollege^2, data = saratoga_test)
+  saratoga_y_test = saratoga_test$price
+  
+  saratoga_lasso_predicted = predict(saratoga_lasso, newx = saratoga_X_test)
+  saratoga_lasso_residuals = saratoga_y_test - saratoga_lasso_predicted
+  
+  rmse_lasso = sqrt(mean(saratoga_lasso_residuals^2))
+  c(rmse_lasso)
+}
+
+colMeans(out_lasso)
+
+```
+
+### KNN model
+
+Finally, we used KNN regression to predict house prices. For model construction, we selected the same variables as in the Lasso regression. The KNN model was trained on scaled data with cross-validation. Again, model performance is measured by average out-of-sample RMSE. It was found that the KNN model generates lower RMSE than both the baseline model and the Lasso model. 
+
+Estimate of out-of-sample RMSE for KNN model:
+
+```{r q1-3}
+
+# KNN model
+# use all variables and some quadratics
+
+saratoga_split = initial_split(SaratogaHouses, prop = 0.8)
+saratoga_train = training(saratoga_split)
+saratoga_test = testing(saratoga_split)
+
+Xtrain = model.matrix(~ . -1 + lotSize^2 + age^2 + landValue^2 + livingArea^2 + pctCollege^2, data=saratoga_train)
+Xtest = model.matrix(~ . -1 + lotSize^2 + age^2 + landValue^2 + livingArea^2 + pctCollege^2, data=saratoga_test)
+
+ytrain = saratoga_train$price
+ytest = saratoga_test$price
+  
+scale_train = apply(Xtrain, 2, sd)  # calculate std dev for each column
+Xtilde_train = scale(Xtrain, scale = scale_train)
+Xtilde_test = scale(Xtest, scale = scale_train)
+
+ctrl = trainControl(method="repeatedcv", number = 5, repeats = 3)
+knnfit = train(Xtilde_train,
+                   ytrain,
+                   method = "knn",
+                   trControl = ctrl,
+                   tunelength = 100)
+y_predict = predict(knnfit, Xtilde_test)
+knn_errors = c(RMSE(ytest, y_predict))
+
+print(knn_errors)
+
+```
+
+### Conclusion
+
+In our comparative analysis of predictive models, the K-Nearest Neighbors (KNN) model emerged as the most accurate, achieving the lowest out-of-sample RMSE and evidently outperforming both the Lasso and the baseline linear models. This indicates that KNN, with its adaptability to data's intricacies, is the most reliable method for predicting property prices, making it the recommended choice for accurately determining market values of houses.
+
+
+## 2. Classification and retrospective sampling
+
+We are dealing with a data set from a German bank including information about loans. Our goal is to investigate how default probability is related to characteristics of loans, and try to make predictions based on the information.
+
+```{r q2-barplot, echo=FALSE}
+
+credit = read.csv("data/german_credit.csv", row.names = 1) 
+
+default_rate = credit %>%
+  group_by(history) %>%
+  summarise(DefaultRate = mean(Default == 1))
+
+ggplot(default_rate, aes(x = history, y = DefaultRate)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "Default Rate by Credit History", 
+       x = "Loan history", 
+       y = "Default rate") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+The bar plot above describes the default rate categorized by different levels of credit history. There are three levels of history: "Good", "Poor", and "Terrible". By observing the plot we can see that among three levels of credit history, the loans with "Good" history have the highest defaulted rate, while the loans with "Terrible" history have the lowest defaulted rate. This result is counter-intuitive, because it suggests that better credit history is related to higher loan default rate. 
+
+We built a prediction model with logistic regression to see if some loan characteristics are good predictors of the default rate. The predictors used are: `duration`, `amount`, `installment`, `age`, `history`, `purpose`, `foreign`.
+
+Coefficients reported by logistic regression model:
+
+```{r q2-regression, echo=FALSE}
+
+credit$installment <- factor(credit$installment)
+
+set.seed(123)
+credit_split = initial_split(credit, 0.8)
+credit_train = training(credit_split)
+credit_test = testing(credit_split)
+
+logit_model <- glm(Default ~ duration + amount + installment + age + history + purpose + foreign, data = credit_train, family = binomial)
+
+coef(logit_model) %>% round(2)
+
+```
+
+Confusion matrix:
+
+```{r q2-confusion}
+
+phat_test = predict(logit_model, newdata = credit_test) 
+yhat_test = ifelse(phat_test > 0.5, 1, 0)
+confusion_out_logit = table(y = credit_test$Default, yhat = yhat_test)
+confusion_out_logit 
+
+```
+
+According to the confusion matrix: error rate = (4+60)/200=0.32, which indicates 68% accuracy. This is not a very high accuracy rate. 
+
+Although the coefficients indicate reasonable relationship between default rate and some characteristics, we can still see counter-intuitive relationships, as well as an unsatisfactory accuracy rate. Combining the regression result and the bar plot, we can reasonably make a hypothesis that there's something in the data which prevents us from making successful predictions. 
+
+Calculate counts of samples falling into different categories:
+
+```{r count, echo=FALSE}
+
+num_good <- sum(credit$history == "good")
+print(paste("Number of 'good' credit history = ", num_good))
+num_poor <- sum(credit$history == "poor")
+print(paste("Number of 'poor' credit history = ", num_poor))
+num_terrible <- sum(credit$history == "terrible") 
+print(paste("Number of 'terrible' credit history = ", num_terrible))
+
+```
+
+Here we can see a huge gap between counts. That is to say, oversampling of some certain categories in the data may potentially be the reason why counter-intuitive statistical results occur. The loans with "good" credit history are underrepresented in the data, and a large portion of them happen to be defaulted loans. This problem may have been caused by how the data was originally selected. Since the loans in the data set was manually selected based on whether the loans have similar situations as the defaulted loans, these loans in the data set cannot represent the real life distribution of borrowers. 
+
+Thus, this data set is an inappropriate one for building a predictive model for defaults. To classify borrowers into "low" and "high" defaulted probability categories, the bank needs a data set which more accurately represents the real distribution and situations of the potential borrowers. For example, randomized sampling can be a good way to achieve this. 
+
+
+## 3. Children and hotel reservations
+
+```{r q3-1}
+
+hotels_dev = read.csv('data/hotels_dev.csv')
+hotels_val = read.csv('data/hotels_val.csv')
+
+```
+
+### Model building
+
+
+
+## 4. Mushroom classification
+
+For this question, our goal is to predict whether a mushroom is poisonous based on attributes of the mushroom. Since all of the variables are categorical, it makes sense to apply one-hot encoding for all of them, and use lasso-penalized logistic regression to select the variables that have predictive power. We dropped the `veil.type` variable, because it only has one value in this data set. 
+
+A plot of our lasso model and the optimal lambda are shown below. 
+
+```{r 4-1}
+
+mushroom = read.csv('data/mushrooms.csv')
+
+#mushroom %>%
+#  select_if(~is.factor(.) | is.character(.)) %>%
+#  map(~unique(.)) %>%
+#  walk2(names(.), ~cat("Levels for", .y, ":", .x, "\n"))
+
+# delete veil.type (only one level)
+mushroom = subset(mushroom, select = -c(veil.type))
+
+mushroom <- mushroom %>%
+  mutate_if(is.character, as.factor)
+
+set.seed(123)
+mushroom_split = initial_split(mushroom, prop = 0.8)
+mushroom_train = training(mushroom_split)
+mushroom_test = testing(mushroom_split)
+
+mushroom_x = model.matrix(class ~ . -1, data=mushroom_train)
+mushroom_y = mushroom_train$class
+
+mushroom_lasso = gamlr(mushroom_x, mushroom_y, family="binomial")
+plot(mushroom_lasso)
+
+# optimal lambda
+optimal_lambda = log(mushroom_lasso$lambda[which.min(AICc(mushroom_lasso))])
+optimal_lambda
+
+```
+
+Variables with non-zero coefficients selected by the algorithm:
+
+```{r 4-2}
+
+# coef
+mushroom_beta = coef(mushroom_lasso) %>% 
+  as.matrix() %>%
+  as.data.frame() %>%
+  filter(seg100 != 0)
+selected = rownames(mushroom_beta)
+selected
+
+```
+
+Using these variables, we were able to generate predicted probabilities of whether a mushroom is poisonous. The out-of-sample performance was evaluated using a ROC curve, which plots sensitivity (TPR) versus specificity (1 - FPR). 
+
+```{r 4-3}
+
+# prediction
+mushroom_x_test = model.matrix(class ~ . -1, data=mushroom_test)
+phat_mushroom = predict(mushroom_lasso, mushroom_x_test, type='response')
+
+# ROC curve
+roc_obj <- roc(mushroom_test$class, phat_mushroom)
+plot(roc_obj, main="ROC Curve")
+
+```
+
+The optimal threshold for declaring a mushroom poisonous:
+
+```{r 4-4}
+
+optimal_coords <- coords(roc_obj, "best", ret="threshold")
+optimal_threshold <- optimal_coords[1,1]
+optimal_threshold
+
+```
+
+The confusion matrix below shows that almost all mushrooms are correctly classified using this threshold. TPR is over 99% and there is no false positive. 
+
+```{r 4-5}
+
+yhat_mushroom = ifelse(phat_mushroom > optimal_threshold, 1, 0)
+confusion_mushroom = table(y = mushroom_test$class, 
+                           yhat = yhat_mushroom)
+confusion_mushroom
+
+TPR <- confusion_mushroom["p","1"] / (confusion_mushroom["p","1"] + confusion_mushroom["p","0"])
+FPR <- confusion_mushroom["e","1"] / (confusion_mushroom["e","1"] + confusion_mushroom["e","0"])
+cat("True Positive Rate:", TPR, "\n")
+cat("False Positive Rate:", FPR, "\n")
+
+```
+
+Although the model we built was extremely accurate with predicting poisonous mushrooms in this data set, we cannot assert that it is a good model for all cases. There could be training biases given the large number of categories in the predictors relative to the number of observations. In fact, based on our results, it is likely that the model suffers from overfitting. Further validations with new data sets are necessary to determine whether it is a good prediction model. 
+
+
