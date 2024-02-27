@@ -1,0 +1,205 @@
+---
+title: "ECO395M Homework 2"
+author: "Kimberly Hu"
+date: "2024-02-25"
+output: md_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      out.width = "75%", out.height = "75%")
+```
+
+```{r packages}
+library(tidyverse)
+library(ggplot2)
+library(modelr)
+library(rsample)
+library(mosaic)
+library(gamlr)
+library(lubridate)
+library(pROC)
+library(foreach)
+
+```
+
+
+## 3. Children and hotel reservations
+
+```{r q3-1}
+
+hotels_dev = read.csv('data/hotels_dev.csv')
+hotels_val = read.csv('data/hotels_val.csv')
+
+```
+
+### Model building
+
+We are interested in building a model that predicts whether a hotel booking will have children on it. To evaluate the performance of our model, we first built two baseline models.  
+1. Logistic regression model with the following predictors: `market_segment`, `adults`, `customer_type`, `is_repeated_guest`
+2. Logistic regression model that uses all the existing predictors except `arrival_date`
+
+```{r q3-2}
+
+set.seed(9)
+
+hotels_dev_split = initial_split(hotels_dev, prop = 0.8)
+hotels_dev_train = training(hotels_dev_split)
+hotels_dev_test = testing(hotels_dev_split)
+
+# baseline model 1
+hotels_logit1 = glm(children ~ market_segment + adults + customer_type + is_repeated_guest, data=hotels_dev_train, family=binomial)
+
+# baseline model 2
+hotels_logit2 = glm(children ~ . - arrival_date, data=hotels_dev_train, family=binomial)
+
+# predictions
+
+phat_hotels_logit1 = predict(hotels_logit1, hotels_dev_test, type='response')
+yhat_hotels_logit1 = ifelse(phat_hotels_logit1 > 0.5, 1, 0)
+confusion_out_hotels_logit1 = table(y = hotels_dev_test$children,
+                                    yhat = yhat_hotels_logit1)
+
+phat_hotels_logit2 = predict(hotels_logit2, hotels_dev_test, type='response')
+yhat_hotels_logit2 = ifelse(phat_hotels_logit2 > 0.5, 1, 0)
+confusion_out_hotels_logit2 = table(y = hotels_dev_test$children,
+                                    yhat = yhat_hotels_logit2)
+
+```
+
+`arrival_date` is a character variable that is difficult to incorporate directly into the model, so we extracted the month from the date, which is a factor of 12 levels, and included `month` as an additional predictor. We used backward selection on all predictors to selection the best combination of features. As a result, `previous_cancellations` and `deposit_type` are excluded.  
+
+```{r q3-3}
+
+# extract month from date
+hotels_dev_train$month = as.factor(substr(hotels_dev_train$arrival_date, 6, 7))
+hotels_dev_test$month = as.factor(substr(hotels_dev_test$arrival_date, 6, 7))
+
+# we built model 3 using backward selection
+# hotel_all = glm(children ~ . - arrival_date, data=hotels_dev_train, family=binomial)
+# hotels_logit3_backward = step(hotel_all, direction="backward")
+
+hotels_logit3 = glm(children ~ . - arrival_date - previous_cancellations - deposit_type, 
+    data=hotels_dev_train, 
+    family=binomial)
+
+```
+
+We produced confusion matrices and calculated TPR, FPR and FDR for the three models. Compared to baseline model 2, our model yields a higher TPR, which means that it correctly identifies more bookings with children. However, it also has higher FPR and FDR. 
+
+
+```{r q3-5}
+
+# fix problem of unrepresented categories in predict
+is.prone <- function(x) is.factor(x) | is.character(x)
+id <- sapply(hotels_dev, is.prone)
+hotels_logit3$xlevels <- Map(union, hotels_logit3$xlevels, lapply(hotels_dev[id], unique))
+
+
+# prediction and confusion matrix
+
+phat_hotels_logit3 = predict(hotels_logit3, hotels_dev_test, type='response')
+yhat_hotels_logit3 = ifelse(phat_hotels_logit3 > 0.5, 1, 0)
+confusion_out_hotels_logit3 = table(y = hotels_dev_test$children,
+                                    yhat = yhat_hotels_logit3)
+
+confusion_matrices <- list(
+  "Model 1" = confusion_out_hotels_logit1,
+  "Model 2" = confusion_out_hotels_logit2,
+  "Model 3" = confusion_out_hotels_logit3
+)
+
+print_confusion_matrices <- function(confusion_list) {
+  for (model_name in names(confusion_list)) {
+    cat(model_name, "Confusion Matrix:\n")
+    print(confusion_list[[model_name]])
+    cat("\n")
+  }
+}
+
+print_confusion_matrices(confusion_matrices)
+
+```
+
+```{r q3-6}
+
+# evaluation
+
+models = list(
+  model1 = c(TP = 0, FP = 0, TN = confusion_out_hotels_logit1[1,1], FN = confusion_out_hotels_logit1[2,1]),
+  model2 = c(TP = confusion_out_hotels_logit2[2,2], FP = confusion_out_hotels_logit2[1,2], TN = confusion_out_hotels_logit2[1,1], FN = confusion_out_hotels_logit2[2,1]),
+  model3 = c(TP = confusion_out_hotels_logit3[2,2], FP = confusion_out_hotels_logit3[1,2], TN = confusion_out_hotels_logit3[1,1], FN = confusion_out_hotels_logit3[2,1])
+)
+
+metrics = lapply(models, function(x) {
+  TPR = x['TP'] / (x['TP'] + x['FN'])
+  FPR = x['FP'] / (x['FP'] + x['TN'])
+  FDR = x['FP'] / (x['FP'] + x['TP'])
+  result = c(TPR = TPR, FPR = FPR, FDR = FDR)
+  names(result) = c("TPR", "FPR", "FDR")
+  return(result)
+})
+
+metrics_df = do.call(rbind, metrics)
+rownames(metrics_df) = paste("Model", 1:3)
+metrics_df
+
+```
+
+### Model validation step 1
+
+We validated our model using the validation data set. The ROC curve is shown below. The curve lies above the straight line, which means that the model makes better predictions than random guesses. 
+
+```{r q3-7}
+
+# predict using validation data
+
+hotels_val$month = as.factor(substr(hotels_val$arrival_date, 6, 7))
+
+phat_hotels_val = predict(hotels_logit3, hotels_val, type='response')
+y_hotels_val = hotels_val$children
+
+# ROC curve
+
+roc_obj_hotel = roc(y_hotels_val, phat_hotels_val)
+plot(roc_obj_hotel, main="ROC Curve")
+
+
+```
+
+### Model validation step 2
+
+By performing predictions for 20 folds and summing up the predictions within each fold, we found that our model consistently under-predicts the number of booking with children. The plot below compares the actual values and predicted values. This is still a lot of room for improvement. 
+
+```{r q3-8}
+
+folds = 20
+
+hotels_val = hotels_val %>%
+  mutate(fold_id = sample(rep(1:folds, length.out = nrow(hotels_val))))
+
+hotels_val_cv = foreach(fold = 1:folds, .combine='rbind') %do% {
+  hotel_val_folds = filter(hotels_val, fold_id == fold)
+  hotel_val_folds_phat = predict(hotels_logit3, hotel_val_folds, type = "response")
+  hotel_val_folds_yhat = ifelse(hotel_val_folds_phat > 0.5, 1, 0)
+  c(sum_y=sum(hotel_val_folds$children), sum_yhat=sum(hotel_val_folds_yhat))
+} %>% as.data.frame()
+
+hotels_val_cv$fold = 1:nrow(hotels_val_cv)
+
+results_long = pivot_longer(hotels_val_cv, cols = c(sum_y, sum_yhat), names_to = "Type", values_to = "Value")
+results_long$fold = as.factor(results_long$fold)
+
+ggplot(results_long, aes(x = fold, y = Value, color = Type, group = Type)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Actual vs. Predicted Bookings with Children",
+       x = "Fold", y = "Number of bookings with children") +
+  scale_color_manual(values = c("sum_y" = "blue", "sum_yhat" = "red"), 
+                     labels = c("Actual", "Predicted"))
+
+
+```
+
+
+
