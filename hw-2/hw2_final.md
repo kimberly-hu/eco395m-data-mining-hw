@@ -27,7 +27,7 @@ as a baseline for performance measurement of our models.
 Estimate of out-of-sample RMSE for baseline model:
 
     ##   result 
-    ## 66978.09
+    ## 66191.59
 
 ### Lasso model
 
@@ -47,7 +47,7 @@ errors.
 Estimate of out-of-sample RMSE for the Lasso model:
 
     ##   result 
-    ## 63306.61
+    ## 63749.99
 
 ### KNN model
 
@@ -60,7 +60,7 @@ model and the Lasso model.
 
 Estimate of out-of-sample RMSE for KNN model:
 
-    ## [1] 49033.69
+    ## [1] 41177.03
 
 ### Conclusion
 
@@ -153,6 +153,71 @@ to achieve this.
 ## 3. Children and hotel reservations
 
 ### Model building
+
+We are interested in building a model that predicts whether a hotel
+booking will have children on it. To evaluate the performance of our
+model, we first built two baseline models.  
+1. Logistic regression model with the following predictors:
+`market_segment`, `adults`, `customer_type`, `is_repeated_guest` 2.
+Logistic regression model that uses all the existing predictors except
+`arrival_date`
+
+`arrival_date` is a character variable that is difficult to incorporate
+directly into the model, so we extracted the month from the date, which
+is a factor of 12 levels, and included `month` as an additional
+predictor. We used backward selection on all predictors to selection the
+best combination of features. As a result, `previous_cancellations` and
+`deposit_type` are excluded. We did not include interactions or
+quadratics because they did not significantly increase performance of
+our model.
+
+To evaluate the out-of-sample performance, we produced confusion
+matrices and calculated TPR, FPR and FDR for the three models. Compared
+to baseline model 2, the model we built yields a higher TPR, which means
+it correctly identifies more bookings with children. However, it also
+has higher FPR and FDR, indicating that more bookings with no children
+are falsely predicted as having children.
+
+    ## Model 1 Confusion Matrix:
+    ##    yhat
+    ## y      0
+    ##   0 8277
+    ##   1  723
+    ## 
+    ## Model 2 Confusion Matrix:
+    ##    yhat
+    ## y      0    1
+    ##   0 8171  106
+    ##   1  466  257
+    ## 
+    ## Model 3 Confusion Matrix:
+    ##    yhat
+    ## y      0    1
+    ##   0 8169  108
+    ##   1  465  258
+
+    ##               TPR        FPR      FDR
+    ## Model 1 0.0000000 0.00000000      NaN
+    ## Model 2 0.3554633 0.01280657 0.292011
+    ## Model 3 0.3568465 0.01304821 0.295082
+
+### Model validation step 1
+
+We validated our model using a validation data set. The ROC curve is
+shown below. The curve lies above the straight line, which means that
+the model makes better predictions than random guesses.
+
+<img src="hw2_final_files/figure-markdown_strict/q3-7-1.png" width="75%" height="75%" />
+
+### Model validation step 2
+
+By performing predictions for 20 folds and summing up the predictions
+within each fold, we found that our model consistently under-predicts
+the number of booking with children. The plot below compares the actual
+values and the predicted values, and shows that there is still a lot of
+room for improvement.
+
+<img src="hw2_final_files/figure-markdown_strict/q3-8-1.png" width="75%" height="75%" />
 
 ## 4. Mushroom classification
 

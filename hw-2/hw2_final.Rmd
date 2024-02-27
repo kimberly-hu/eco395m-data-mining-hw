@@ -258,7 +258,7 @@ confusion_out_hotels_logit2 = table(y = hotels_dev_test$children,
 
 ```
 
-`arrival_date` is a character variable that is difficult to incorporate directly into the model, so we extracted the month from the date, which is a factor of 12 levels, and included `month` as an additional predictor. We used backward selection on all predictors to selection the best combination of features. As a result, `previous_cancellations` and `deposit_type` are excluded.  
+`arrival_date` is a character variable that is difficult to incorporate directly into the model, so we extracted the month from the date, which is a factor of 12 levels, and included `month` as an additional predictor. We used backward selection on all predictors to selection the best combination of features. As a result, `previous_cancellations` and `deposit_type` are excluded. We did not include interactions or quadratics because they did not significantly increase performance of our model.   
 
 ```{r q3-3}
 
@@ -276,14 +276,14 @@ hotels_logit3 = glm(children ~ . - arrival_date - previous_cancellations - depos
 
 ```
 
-We produced confusion matrices and calculated TPR, FPR and FDR for the three models. Compared to baseline model 2, our model yields a higher TPR, which means that it correctly identifies more bookings with children. However, it also has higher FPR and FDR. 
+To evaluate the out-of-sample performance, we produced confusion matrices and calculated TPR, FPR and FDR for the three models. Compared to baseline model 2, the model we built yields a higher TPR, which means it correctly identifies more bookings with children. However, it also has higher FPR and FDR, indicating that more bookings with no children are falsely predicted as having children. 
 
 ```{r q3-5}
 
 # fix problem of unrepresented categories in predict
-is.prone <- function(x) is.factor(x) | is.character(x)
-id <- sapply(hotels_dev, is.prone)
-hotels_logit3$xlevels <- Map(union, hotels_logit3$xlevels, lapply(hotels_dev[id], unique))
+#is.prone <- function(x) is.factor(x) | is.character(x)
+#id <- sapply(hotels_dev, is.prone)
+#hotels_logit3$xlevels <- Map(union, hotels_logit3$xlevels, lapply(hotels_dev[id], unique))
 
 
 # prediction and confusion matrix
@@ -338,7 +338,7 @@ metrics_df
 
 ### Model validation step 1
 
-We validated our model using the validation data set. The ROC curve is shown below. The curve lies above the straight line, which means that the model makes better predictions than random guesses. 
+We validated our model using a validation data set. The ROC curve is shown below. The curve lies above the straight line, which means that the model makes better predictions than random guesses. 
 
 ```{r q3-7}
 
@@ -359,7 +359,7 @@ plot(roc_obj_hotel, main="ROC Curve")
 
 ### Model validation step 2
 
-By performing predictions for 20 folds and summing up the predictions within each fold, we found that our model consistently under-predicts the number of booking with children. The plot below compares the actual values and predicted values. This is still a lot of room for improvement. 
+By performing predictions for 20 folds and summing up the predictions within each fold, we found that our model consistently under-predicts the number of booking with children. The plot below compares the actual values and the predicted values, and shows that there is still a lot of room for improvement. 
 
 ```{r q3-8}
 
