@@ -158,8 +158,8 @@ We are interested in building a model that predicts whether a hotel
 booking will have children on it. To evaluate the performance of our
 model, we first built two baseline models.  
 1. Logistic regression model with the following predictors:
-`market_segment`, `adults`, `customer_type`, `is_repeated_guest` 2.
-Logistic regression model that uses all the existing predictors except
+`market_segment`, `adults`, `customer_type`, `is_repeated_guest`
+2. Logistic regression model that uses all the existing predictors except
 `arrival_date`
 
 `arrival_date` is a character variable that is difficult to incorporate
